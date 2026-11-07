@@ -3,7 +3,7 @@ import time
 import asyncio
 import threading
 import random
-import string
+import requests
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
@@ -20,20 +20,40 @@ def run_flask():
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
 
+# ----------------- Keep-Alive Loop (Sleep Mode Prevention) -----------------
+def keep_alive_ping():
+    while True:
+        time.sleep(600)  # Har 10 minute mein ping karega
+        render_url = os.environ.get("RENDER_EXTERNAL_URL")
+        if render_url:
+            try:
+                requests.get(render_url)
+                print("Keep-alive ping sent successfully!")
+            except Exception as e:
+                print(f"Ping failed: {e}")
+
 # ----------------- Bot Configuration & States -----------------
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "9108604045:AAGqQJRMLhEypLYnyVRdELsva0er_2npiJI")
 PASSWORD = "Rishi#123"
 
 waiting_for_password = set()
 waiting_for_link = set()
-waiting_for_id_pass = set()
+waiting_for_ptc_pass = set()
 active_watchers = {}
 
-def generate_random_username():
-    adjectives = ["cool", "insta", "pro", "cyber", "dark", "royal", "killer", "smart", "ig", "fast"]
-    nouns = ["boy", "girl", "king", "queen", "boss", "hacker", "ninja", "gamer", "user", "bot"]
-    num = random.randint(100, 9999)
-    return f"{random.choice(adjectives)}_{random.choice(nouns)}{num}"
+def generate_ptc_details(custom_pass):
+    adjectives = ["shadow", "poke", "trainer", "master", "mystic", "valor", "instinct", "elite", "turbo", "mega"]
+    nouns = ["goh", "ash", "brock", "mew", "mewtwo", "charizard", "pikachu", "lugia", "rayquaza", "blaze"]
+    num = random.randint(1000, 9999)
+    
+    username = f"{random.choice(adjectives)}_{random.choice(nouns)}{num}"
+    mail = f"{username}@tempmail.com"
+    
+    return {
+        "username": username,
+        "password": custom_pass,
+        "mail": mail
+    }
 
 # ----------------- Handlers & Logic -----------------
 
@@ -64,23 +84,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Galat Password! Dobara try karein:")
         return
 
-    # 2. ID Generation - Custom Password Input Handler
-    if user_id in waiting_for_id_pass:
-        waiting_for_id_pass.remove(user_id)
+    # 2. PTC Account Generation - Custom Password Input Handler
+    if user_id in waiting_for_ptc_pass:
+        waiting_for_ptc_pass.remove(user_id)
         custom_password = text
         
-        username = generate_random_username()
-        mail = f"{username}@tempmail.com"
+        acc = generate_ptc_details(custom_password)
 
         details = (
-            f"⚡ **Nayi Instagram ID Successfully Generated!**\n\n"
-            f"👤 **Username:** `{username}`\n"
-            f"🔑 **Password:** `{custom_password}`\n"
-            f"📧 **Bonded Mail:** `{mail}`"
+            f"🎮 **Pokémon Trainer Club (PTC) Account Data Ready!**\n\n"
+            f"👤 **Username:** `{acc['username']}`\n"
+            f"🔑 **Password:** `{acc['password']}`\n"
+            f"📧 **Temp Mail:** `{acc['mail']}`\n\n"
+            f"🛠 **Instructions (Manual Creation):**\n"
+            f"1. Pokémon Trainer Club official signup page par jayein.\n"
+            f"2. Upar diye gaye Username, Mail aur Password ko fill karein.\n"
+            f"3. Captcha manually solve karke account create karein aur mail se activate karein!"
         )
         
         keyboard = [
-            [InlineKeyboardButton("🔄 Aur ID Banayein", callback_data="menu_gen_ids")],
+            [InlineKeyboardButton("🔄 Aur Account Banayein", callback_data="menu_gen_ptc")],
             [InlineKeyboardButton("« Main Menu", callback_data="back_to_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -110,7 +133,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def show_main_menu(update: Update):
     keyboard = [
-        [InlineKeyboardButton("🚀 Start IDs Generation", callback_data="menu_gen_ids")],
+        [InlineKeyboardButton("🚀 Create PTC Account", callback_data="menu_gen_ptc")],
         [InlineKeyboardButton("📊 Watch Stats", callback_data="menu_watch_stats")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -137,12 +160,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Session expire ho gaya hai. Kripya phir se /start use karein.")
         return
 
-    if query.data == "menu_gen_ids":
-        waiting_for_id_pass.add(user_id)
+    if query.data == "menu_gen_ptc":
+        waiting_for_ptc_pass.add(user_id)
         keyboard = [[InlineKeyboardButton("« Main Menu", callback_data="back_to_menu")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
-            "🔑 Kripya apni nayi Instagram ID ke liye **Password** type karke bhejiye:",
+            "🔑 Kripya naye Pokémon Trainer Club account ke liye apna pasandida **Password** type karke bhejiye:",
             reply_markup=reply_markup,
             parse_mode="Markdown"
         )
@@ -196,9 +219,15 @@ async def stats_loop(update, msg, url, user_id):
 def main():
     database.init_db()
 
+    # Flask server background thread
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
+
+    # Keep-alive ping loop background thread (Sleep mode prevention)
+    ping_thread = threading.Thread(target=keep_alive_ping)
+    ping_thread.daemon = True
+    ping_thread.start()
 
     try:
         loop = asyncio.get_event_loop()
@@ -217,3 +246,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+                    
