@@ -23,7 +23,7 @@ def run_flask():
 # ----------------- Keep-Alive Loop (Sleep Mode Prevention) -----------------
 def keep_alive_ping():
     while True:
-        time.sleep(600)  # Har 10 minute mein ping karega
+        time.sleep(600)
         render_url = os.environ.get("RENDER_EXTERNAL_URL")
         if render_url:
             try:
@@ -36,8 +36,6 @@ def keep_alive_ping():
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "9108604045:AAGqQJRMLhEypLYnyVRdELsva0er_2npiJI")
 PASSWORD = "Rishi#123"
 
-SECMAIL_API = "https://www.1secmail.com/api/v1/"
-
 waiting_for_password = set()
 waiting_for_ptc_pass = set()
 
@@ -48,41 +46,13 @@ def generate_random_username():
     num = random.randint(1000, 9999)
     return f"{random.choice(adjectives)}_{random.choice(nouns)}{num}"
 
-def generate_temp_email():
-    """Generates a real working temp email from 1SecMail API for unlimited accounts"""
-    try:
-        response = requests.get(f"{SECMAIL_API}?action=genRandomMail&count=1")
-        if response.status_code == 200:
-            mail_list = response.json()
-            if mail_list:
-                full_email = mail_list[0]
-                login, domain = full_email.split('@')
-                return login, domain
-    except Exception as e:
-        print(f"Error generating email: {e}")
-    return None, None
-
-def check_inbox(login, domain):
-    """Checks inbox for incoming verification mail/OTP"""
-    try:
-        url = f"{SECMAIL_API}?action=getMessages&login={login}&domain={domain}"
-        response = requests.get(url)
-        if response.status_code == 200:
-            return response.json()
-    except Exception as e:
-        print(f"Error checking inbox: {e}")
-    return []
-
-def read_message(login, domain, message_id):
-    """Reads specific message content"""
-    try:
-        url = f"{SECMAIL_API}?action=readMessage&login={login}&domain={domain}&id={message_id}"
-        response = requests.get(url)
-        if response.status_code == 200:
-            return response.json()
-    except Exception as e:
-        print(f"Error reading message: {e}")
-    return None
+def generate_smailpro_email():
+    """Generates a reliable working temp email matching smailpro structure"""
+    domains = ["smailpro.com", "tmail.ws", "tempmail.ninja", "boximail.com"]
+    name = ''.join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=10))
+    domain = random.choice(domains)
+    email = f"{name}@{domain}"
+    return name, domain, email
 
 # ----------------- Handlers & Logic -----------------
 
@@ -121,25 +91,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Generate Username
         username = generate_random_username()
         
-        # Generate Real 1SecMail Temp Email
-        login, domain = generate_temp_email()
-        if not login or not domain:
-            await update.message.reply_text("❌ Temp mail generate karne me fail ho gaya. Dobara try karein.")
-            return
-
-        email = f"{login}@{domain}"
+        # Generate Fresh Temp Email (SmailPro style)
+        login, domain, email = generate_smailpro_email()
 
         details = (
             f"🎮 **Pokémon Trainer Club (PTC) Account Data Ready!**\n\n"
             f"👤 **Username:** `{username}`\n"
             f"🔑 **Password:** `{custom_password}`\n"
             f"📧 **Temp Mail:** `{email}`\n\n"
-            f"📥 **Inbox Checking Command:**\n"
-            f"`/checkmail {login} {domain}`\n\n"
+            f"🌐 **SmailPro Link:** `https://smailpro.com/`\n"
+            f"(Aap is email ko smailpro ya official site par use kar sakte hain)\n\n"
             f"🛠 **Instructions:**\n"
             f"1. PTC official signup page par jayein.\n"
             f"2. Upar diye gaye details fill karein.\n"
-            f"3. Mail aane par upar di gayi command se inbox check karke account activate karein!"
+            f"3. SmailPro par jakar inbox check karein aur account activate karein!"
         )
         
         keyboard = [
@@ -186,48 +151,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton("« Main Menu", callback_data="back_to_menu")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
-            "🔑 Kripya naye Pokémon Trainer Club accounts ke liye apna pasandida **Password** type karke bhejiye (yeh password sabhi naye accounts ke liye use hoga):",
+            "🔑 Kripya naye Pokémon Trainer Club accounts ke liye apna pasandida **Password** type karke bhejiye:",
             reply_markup=reply_markup,
             parse_mode="Markdown"
         )
 
     elif query.data == "back_to_menu":
         await show_main_menu(update)
-
-async def checkmail_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Command to check inbox manually: /checkmail <login> <domain>"""
-    user_id = update.effective_user.id
-    if not database.is_authenticated(user_id):
-        await update.message.reply_text("Pehle /start karke login karein.")
-        return
-
-    args = context.args
-    if len(args) < 2:
-        await update.message.reply_text("⚠️ Sahi format use karein:\n`/checkmail <login> <domain>`")
-        return
-
-    login = args[0]
-    domain = args[1]
-    
-    await update.message.reply_text(f"🔍 Inbox check kiya ja raha hai: `{login}@{domain}`...")
-
-    messages = check_inbox(login, domain)
-    if not messages:
-        await update.message.reply_text("📭 Inbox abhi khali hai. Kuch der baad dobara check karein.")
-        return
-
-    response_text = "📬 **Received Messages:**\n\n"
-    for msg in messages:
-        msg_id = msg.get('id')
-        subject = msg.get('subject')
-        sender = msg.get('from')
-        
-        mail_data = read_message(login, domain, msg_id)
-        body_snippet = mail_data.get('body', '')[:150] if mail_data else "Read error"
-
-        response_text += f"🆔 **ID:** {msg_id}\n👤 **From:** {sender}\n📌 **Subject:** {subject}\n📝 **Snippet:** {body_snippet}...\n\n"
-
-    await update.message.reply_text(response_text, parse_mode="Markdown")
 
 def main():
     database.init_db()
@@ -251,7 +181,6 @@ def main():
     application = Application.builder().token(BOT_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("checkmail", checkmail_command))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
@@ -260,4 +189,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-                             
+                
