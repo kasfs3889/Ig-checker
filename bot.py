@@ -26,7 +26,7 @@ PASSWORD = "Rishi#123"
 
 waiting_for_password = set()
 waiting_for_link = set()
-waiting_for_id_pass = set()  # User se ID ka password lene ke liye state
+waiting_for_id_pass = set()
 active_watchers = {}
 
 def generate_random_username():
@@ -69,7 +69,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         waiting_for_id_pass.remove(user_id)
         custom_password = text
         
-        # Random username aur temp mail generate karein
         username = generate_random_username()
         mail = f"{username}@tempmail.com"
 
@@ -97,7 +96,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         msg = await update.message.reply_text(
-            f"📊 **Live Stats Watcher Start Ho Chuka Hai**\nLink: {url}\n\nInitial data fetch ho raha hai...",
+            f"📊 **Live Stats Watcher Start Ho Chuka Hai**\nLink: {url}\n\nInitial data fetch ho raha है...",
             reply_markup=reply_markup,
             parse_mode="Markdown"
         )
@@ -194,9 +193,17 @@ async def stats_loop(update, msg, url, user_id):
 def main():
     database.init_db()
 
+    # Flask background thread start karein
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
+
+    # Python 3.14 event loop fix for main thread
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
     application = Application.builder().token(BOT_TOKEN).build()
 
@@ -209,4 +216,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-                  
+    
