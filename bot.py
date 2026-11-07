@@ -5,6 +5,7 @@ import threading
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+import database  # Database file import ki hai
 
 # ----------------- Flask App for Render Web Service -----------------
 app = Flask(__name__)
@@ -21,8 +22,7 @@ def run_flask():
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "9108604045:AAGqQJRMLhEypLYnyVRdELsva0er_2npiJI") # Render environment variable se uthayega
 PASSWORD = "NexT1010"
 
-# In-memory storage for user sessions and active watchers
-authenticated_users = set()
+# In-memory states for ongoing workflows (like password typing or link inputs)
 waiting_for_password = set()
 waiting_for_link = set()
 active_watchers = {}  # user_id -> True/False control for live stats
@@ -31,7 +31,9 @@ active_watchers = {}  # user_id -> True/False control for live stats
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id in authenticated_users:
+    
+    # Database se check karein ki user pehle se authenticated hai ya nahi
+    if database.is_authenticated(user_id):
         await show_main_menu(update)
     else:
         waiting_for_password.add(user_id)
@@ -48,7 +50,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in waiting_for_password:
         if text == PASSWORD:
             waiting_for_password.remove(user_id)
-            authenticated_users.add(user_id)
+            database.add_authenticated_user(user_id)  # Database mein save kar diya
             await update.message.reply_text("✅ Password Verified Successfully!")
             await show_main_menu(update)
         else:
@@ -75,7 +77,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         asyncio.create_task(stats_loop(update, msg, url, user_id))
         return
 
-    if user_id not in authenticated_users:
+    if not database.is_authenticated(user_id):
         await update.message.reply_text("Please use /start and enter the password first.")
 
 async def show_main_menu(update: Update):
@@ -104,8 +106,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     user_id = query.from_user.id
 
-    if user_id not in authenticated_users:
-        await query.edit_message_text("Session expired. Please use /start again.")
+    if not database.is_authenticated(user_id):
+        await query.edit_message_text("Session expired or unauthorized. Please use /start again.")
         return
 
     if query.data == "menu_gen_ids":
@@ -143,7 +145,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton("« Back to Menu", callback_data="back_to_menu")]]
         await query.edit_message_text(
             "🔗 Please send the **Instagram Reel or Post Link** in the chat now:",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            reply_markup=reply_markup,
             parse_mode="Markdown"
         )
 
@@ -186,6 +188,9 @@ async def stats_loop(update, msg, url, user_id):
             break
 
 def main():
+    # Database initialize karein jab bot start ho
+    database.init_db()
+
     # Start Flask in a background thread so Render port binding succeeds
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.daemon = True
@@ -203,4 +208,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-                              
