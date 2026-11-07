@@ -83,7 +83,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🔄 Aur ID Banayein", callback_data="menu_gen_ids")],
             [InlineKeyboardButton("« Main Menu", callback_data="back_to_menu")]
         ]
-        await update.message.reply_text(details, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(details, reply_markup=reply_markup, parse_mode="Markdown")
         return
 
     # 3. Waiting for Reel/Post Link for Stats Watcher
@@ -96,7 +97,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         msg = await update.message.reply_text(
-            f"📊 **Live Stats Watcher Start Ho Chuka Hai**\nLink: {url}\n\nInitial data fetch ho raha है...",
+            f"📊 **Live Stats Watcher Start Ho Chuka Hai**\nLink: {url}\n\nInitial data fetch ho raha hai...",
             reply_markup=reply_markup,
             parse_mode="Markdown"
         )
@@ -139,6 +140,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "menu_gen_ids":
         waiting_for_id_pass.add(user_id)
         keyboard = [[InlineKeyboardButton("« Main Menu", callback_data="back_to_menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
             "🔑 Kripya apni nayi Instagram ID ke liye **Password** type karke bhejiye:",
             reply_markup=reply_markup,
@@ -148,6 +150,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "menu_watch_stats":
         waiting_for_link.add(user_id)
         keyboard = [[InlineKeyboardButton("« Main Menu", callback_data="back_to_menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
             "🔗 Kripya chat me **Instagram Reel ya Post ka Link** bhejiye:",
             reply_markup=reply_markup,
@@ -193,12 +196,10 @@ async def stats_loop(update, msg, url, user_id):
 def main():
     database.init_db()
 
-    # Flask background thread start karein
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
 
-    # Python 3.14 event loop fix for main thread
     try:
         loop = asyncio.get_event_loop()
     except RuntimeError:
@@ -216,4 +217,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
