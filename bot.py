@@ -36,24 +36,53 @@ def keep_alive_ping():
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "9108604045:AAGqQJRMLhEypLYnyVRdELsva0er_2npiJI")
 PASSWORD = "Rishi#123"
 
-waiting_for_password = set()
-waiting_for_link = set()
-waiting_for_ptc_pass = set()
-active_watchers = {}
+SECMAIL_API = "https://www.1secmail.com/api/v1/"
 
-def generate_ptc_details(custom_pass):
+waiting_for_password = set()
+waiting_for_ptc_pass = set()
+
+def generate_random_username():
+    """Generates a random PTC username"""
     adjectives = ["shadow", "poke", "trainer", "master", "mystic", "valor", "instinct", "elite", "turbo", "mega"]
     nouns = ["goh", "ash", "brock", "mew", "mewtwo", "charizard", "pikachu", "lugia", "rayquaza", "blaze"]
     num = random.randint(1000, 9999)
-    
-    username = f"{random.choice(adjectives)}_{random.choice(nouns)}{num}"
-    mail = f"{username}@tempmail.com"
-    
-    return {
-        "username": username,
-        "password": custom_pass,
-        "mail": mail
-    }
+    return f"{random.choice(adjectives)}_{random.choice(nouns)}{num}"
+
+def generate_temp_email():
+    """Generates a real working temp email from 1SecMail API for unlimited accounts"""
+    try:
+        response = requests.get(f"{SECMAIL_API}?action=genRandomMail&count=1")
+        if response.status_code == 200:
+            mail_list = response.json()
+            if mail_list:
+                full_email = mail_list[0]
+                login, domain = full_email.split('@')
+                return login, domain
+    except Exception as e:
+        print(f"Error generating email: {e}")
+    return None, None
+
+def check_inbox(login, domain):
+    """Checks inbox for incoming verification mail/OTP"""
+    try:
+        url = f"{SECMAIL_API}?action=getMessages&login={login}&domain={domain}"
+        response = requests.get(url)
+        if response.status_code == 200:
+            return response.json()
+    except Exception as e:
+        print(f"Error checking inbox: {e}")
+    return []
+
+def read_message(login, domain, message_id):
+    """Reads specific message content"""
+    try:
+        url = f"{SECMAIL_API}?action=readMessage&login={login}&domain={domain}&id={message_id}"
+        response = requests.get(url)
+        if response.status_code == 200:
+            return response.json()
+    except Exception as e:
+        print(f"Error reading message: {e}")
+    return None
 
 # ----------------- Handlers & Logic -----------------
 
@@ -89,17 +118,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         waiting_for_ptc_pass.remove(user_id)
         custom_password = text
         
-        acc = generate_ptc_details(custom_password)
+        # Generate Username
+        username = generate_random_username()
+        
+        # Generate Real 1SecMail Temp Email
+        login, domain = generate_temp_email()
+        if not login or not domain:
+            await update.message.reply_text("❌ Temp mail generate karne me fail ho gaya. Dobara try karein.")
+            return
+
+        email = f"{login}@{domain}"
 
         details = (
             f"🎮 **Pokémon Trainer Club (PTC) Account Data Ready!**\n\n"
-            f"👤 **Username:** `{acc['username']}`\n"
-            f"🔑 **Password:** `{acc['password']}`\n"
-            f"📧 **Temp Mail:** `{acc['mail']}`\n\n"
-            f"🛠 **Instructions (Manual Creation):**\n"
-            f"1. Pokémon Trainer Club official signup page par jayein.\n"
-            f"2. Upar diye gaye Username, Mail aur Password ko fill karein.\n"
-            f"3. Captcha manually solve karke account create karein aur mail se activate karein!"
+            f"👤 **Username:** `{username}`\n"
+            f"🔑 **Password:** `{custom_password}`\n"
+            f"📧 **Temp Mail:** `{email}`\n\n"
+            f"📥 **Inbox Checking Command:**\n"
+            f"`/checkmail {login} {domain}`\n\n"
+            f"🛠 **Instructions:**\n"
+            f"1. PTC official signup page par jayein.\n"
+            f"2. Upar diye gaye details fill karein.\n"
+            f"3. Mail aane par upar di gayi command se inbox check karke account activate karein!"
         )
         
         keyboard = [
@@ -110,43 +150,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(details, reply_markup=reply_markup, parse_mode="Markdown")
         return
 
-    # 3. Waiting for Reel/Post Link for Stats Watcher
-    if user_id in waiting_for_link:
-        waiting_for_link.remove(user_id)
-        url = text
-        active_watchers[user_id] = True
-        
-        keyboard = [[InlineKeyboardButton("🛑 Stop Stats", callback_data="stop_stats")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        msg = await update.message.reply_text(
-            f"📊 **Live Stats Watcher Start Ho Chuka Hai**\nLink: {url}\n\nInitial data fetch ho raha hai...",
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
-        )
-        
-        asyncio.create_task(stats_loop(update, msg, url, user_id))
-        return
-
     if not database.is_authenticated(user_id):
         await update.message.reply_text("Pehle /start use karke password enter karein.")
 
 async def show_main_menu(update: Update):
     keyboard = [
-        [InlineKeyboardButton("🚀 Create PTC Account", callback_data="menu_gen_ptc")],
-        [InlineKeyboardButton("📊 Watch Stats", callback_data="menu_watch_stats")]
+        [InlineKeyboardButton("🚀 Create Unlimited PTC Accounts", callback_data="menu_gen_ptc")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     if update.callback_query:
         await update.callback_query.message.edit_text(
-            "🎛 **Main Menu**\nNeeche diye gaye options me se select karein:",
+            "🎛 **Main Menu (PTC Generator Bot)**\nNeeche diye gaye option se account generate karna shuru karein:",
             reply_markup=reply_markup,
             parse_mode="Markdown"
         )
     else:
         await update.message.reply_text(
-            "🎛 **Main Menu**\nNeeche diye gaye options me se select karein:",
+            "🎛 **Main Menu (PTC Generator Bot)**\nNeeche diye gaye option se account generate karna shuru karein:",
             reply_markup=reply_markup,
             parse_mode="Markdown"
         )
@@ -165,17 +186,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton("« Main Menu", callback_data="back_to_menu")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
-            "🔑 Kripya naye Pokémon Trainer Club account ke liye apna pasandida **Password** type karke bhejiye:",
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
-        )
-
-    elif query.data == "menu_watch_stats":
-        waiting_for_link.add(user_id)
-        keyboard = [[InlineKeyboardButton("« Main Menu", callback_data="back_to_menu")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            "🔗 Kripya chat me **Instagram Reel ya Post ka Link** bhejiye:",
+            "🔑 Kripya naye Pokémon Trainer Club accounts ke liye apna pasandida **Password** type karke bhejiye (yeh password sabhi naye accounts ke liye use hoga):",
             reply_markup=reply_markup,
             parse_mode="Markdown"
         )
@@ -183,38 +194,40 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "back_to_menu":
         await show_main_menu(update)
 
-    elif query.data == "stop_stats":
-        active_watchers[user_id] = False
-        await query.edit_message_text("🛑 **Stats Watcher Successfully Rok Diya Gaya Hai**.\n\nMenu me jaane ke liye /start use karein.")
+async def checkmail_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Command to check inbox manually: /checkmail <login> <domain>"""
+    user_id = update.effective_user.id
+    if not database.is_authenticated(user_id):
+        await update.message.reply_text("Pehle /start karke login karein.")
+        return
 
-async def stats_loop(update, msg, url, user_id):
-    counter = 1
-    views = random.randint(1200, 1500)
-    likes = random.randint(150, 200)
+    args = context.args
+    if len(args) < 2:
+        await update.message.reply_text("⚠️ Sahi format use karein:\n`/checkmail <login> <domain>`")
+        return
 
-    while active_watchers.get(user_id, False):
-        await asyncio.sleep(60)
-        if not active_watchers.get(user_id, False):
-            break
+    login = args[0]
+    domain = args[1]
+    
+    await update.message.reply_text(f"🔍 Inbox check kiya ja raha hai: `{login}@{domain}`...")
+
+    messages = check_inbox(login, domain)
+    if not messages:
+        await update.message.reply_text("📭 Inbox abhi khali hai. Kuch der baad dobara check karein.")
+        return
+
+    response_text = "📬 **Received Messages:**\n\n"
+    for msg in messages:
+        msg_id = msg.get('id')
+        subject = msg.get('subject')
+        sender = msg.get('from')
         
-        views += random.randint(20, 80)
-        likes += random.randint(2, 10)
-        
-        keyboard = [[InlineKeyboardButton("🛑 Stop Stats", callback_data="stop_stats")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        try:
-            text = (
-                f"📊 **Live Stats Update (Minute {counter})**\n"
-                f"🔗 Link: {url}\n\n"
-                f"👀 **Views:** `{views}`\n"
-                f"❤️ **Likes:** `{likes}`\n"
-                f"⏱ *Status: Monitoring active...*"
-            )
-            await msg.edit_text(text, reply_markup=reply_markup, parse_mode="Markdown")
-            counter += 1
-        except Exception:
-            break
+        mail_data = read_message(login, domain, msg_id)
+        body_snippet = mail_data.get('body', '')[:150] if mail_data else "Read error"
+
+        response_text += f"🆔 **ID:** {msg_id}\n👤 **From:** {sender}\n📌 **Subject:** {subject}\n📝 **Snippet:** {body_snippet}...\n\n"
+
+    await update.message.reply_text(response_text, parse_mode="Markdown")
 
 def main():
     database.init_db()
@@ -238,6 +251,7 @@ def main():
     application = Application.builder().token(BOT_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("checkmail", checkmail_command))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
@@ -246,4 +260,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-                    
+                             
