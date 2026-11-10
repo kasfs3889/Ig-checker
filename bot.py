@@ -50,7 +50,7 @@ def generate_random_username():
     return f"{random.choice(adjectives)}_{random.choice(nouns)}{num}"
 
 def create_ptc_account_automated(username, password):
-    """Automatically registers PTC account using web sessions and proper payload handling"""
+    """Strict PTC Account Creator - No Fake Success Messages"""
     session = requests.Session()
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -59,17 +59,16 @@ def create_ptc_account_automated(username, password):
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
     }
     
-    # Generate dynamic temp email matching smailpro pattern
     domains = ["smailpro.com", "tmail.ws", "tempmail.ninja"]
     email = f"{username.lower()}@{random.choice(domains)}"
     
     try:
-        # Step 1: Get cookies/CSRF tokens from the signup page
+        # Step 1: Connect to PTC signup page
         get_res = session.get(PTC_SIGNUP_URL, headers=headers, timeout=15)
         if get_res.status_code != 200:
-            return False, email, f"Failed to connect to PTC signup page (Status: {get_res.status_code})"
+            return False, email, "Account not created, please try again."
 
-        # Step 2: Prepare registration payload
+        # Step 2: Payload preparation
         payload = {
             "username": username,
             "password": password,
@@ -81,20 +80,26 @@ def create_ptc_account_automated(username, password):
             "terms": "true"
         }
         
-        # Step 3: Post auto-registration request
+        # Step 3: Post registration request
         post_res = session.post(PTC_SIGNUP_URL, data=payload, headers=headers, timeout=20)
         
-        # Check actual server response
+        # Strict validation: If blocked by Cloudflare, captcha, or non-200/302, fail immediately
         if post_res.status_code in [200, 302, 303]:
-            # Verify if response contains success markers or error warnings
-            if "error" in post_res.text.lower() or "captcha" in post_res.text.lower():
-                return False, email, "Blocked by PTC Security/Captcha protection."
-            return True, email, "Account successfully registered!"
+            response_text = post_res.text.lower()
+            if "error" in response_text or "captcha" in response_text or "cloudflare" in response_text or "blocked" in response_text:
+                return False, email, "Account not created, please try again."
+            
+            # Additional check: Look for success indicators in HTML (if any)
+            if "congratulations" in response_text or "successfully" in response_text or "account created" in response_text:
+                return True, email, "Account successfully registered!"
+            else:
+                # PTC usually blocks programmatic requests without explicit success markers
+                return False, email, "Account not created, please try again."
         else:
-            return False, email, f"Registration failed with HTTP status code: {post_res.status_code}"
+            return False, email, "Account not created, please try again."
             
     except Exception as e:
-        return False, email, f"Connection error during registration: {str(e)}"
+        return False, email, "Account not created, please try again."
 
 # ----------------- Handlers & Logic -----------------
 
@@ -130,7 +135,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         waiting_for_ptc_pass.remove(user_id)
         custom_password = text
         
-        await update.message.reply_text("⏳ Bot is automatically creating the PTC account, please wait...")
+        await update.message.reply_text("⏳ Processing PTC account creation, please wait...")
 
         # Generate Username
         username = generate_random_username()
@@ -148,7 +153,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"🌐 **Inbox Check:** Use `https://smailpro.com/` to verify and activate."
             )
             
-            # Send permanent separate log to specific Chat ID 6253936543
+            # Send log to admin chat
             try:
                 log_text = (
                     f"🚨 **New PTC Account Auto-Created!**\n\n"
@@ -162,14 +167,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 print(f"Failed to send log to admin chat: {e}")
         else:
             details = (
-                f"❌ **Account Creation Failed!**\n\n"
+                f"❌ **Account not created, please try again.**\n\n"
                 f"👤 **Username Attempted:** `{username}`\n"
-                f"⚠️ **Reason:** `{status_msg}`\n\n"
-                f"Kripya dobara try karein."
+                f"⚠️ **Reason:** PTC Server blocked automated request (Security/Captcha)."
             )
 
         keyboard = [
-            [InlineKeyboardButton("🔄 Aur Account Banayein", callback_data="menu_gen_ptc")],
+            [InlineKeyboardButton("🔄 Phir se Try Karein", callback_data="menu_gen_ptc")],
             [InlineKeyboardButton("« Main Menu", callback_data="back_to_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -187,13 +191,13 @@ async def show_main_menu(update: Update):
     
     if update.callback_query:
         await update.callback_query.message.edit_text(
-            "🎛 **Main Menu (PTC Auto-Creator Bot)**\nNeeche diye gaye option se account automatic banana shuru karein:",
+            "🎛 **Main Menu (PTC Auto-Creator Bot)**\nNeeche diye gaye option se account banana shuru karein:",
             reply_markup=reply_markup,
             parse_mode="Markdown"
         )
     else:
         await update.message.reply_text(
-            "🎛 **Main Menu (PTC Auto-Creator Bot)**\nNeeche diye gaye option se account automatic banana shuru karein:",
+            "🎛 **Main Menu (PTC Auto-Creator Bot)**\nNeeche diye gaye option se account banana shuru karein:",
             reply_markup=reply_markup,
             parse_mode="Markdown"
         )
@@ -250,3 +254,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+        
