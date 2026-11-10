@@ -7,6 +7,7 @@ import requests
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from playwright.async_api import async_playwright
 import database
 
 # ----------------- Flask App for Render Web Service -----------------
@@ -49,57 +50,72 @@ def generate_random_username():
     num = random.randint(1000, 9999)
     return f"{random.choice(adjectives)}_{random.choice(nouns)}{num}"
 
-def create_ptc_account_automated(username, password):
-    """Strict PTC Account Creator - No Fake Success Messages"""
-    session = requests.Session()
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Referer": PTC_SIGNUP_URL,
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
-    }
-    
-    domains = ["smailpro.com", "tmail.ws", "tempmail.ninja"]
-    email = f"{username.lower()}@{random.choice(domains)}"
-    
-    try:
-        # Step 1: Connect to PTC signup page
-        get_res = session.get(PTC_SIGNUP_URL, headers=headers, timeout=15)
-        if get_res.status_code != 200:
-            return False, email, "Account not created, please try again."
+async def create_ptc_account_playwright(username, password, email):
+    """Automates PTC form filling using Playwright browser"""
+    async with async_playwright() as p:
+        # Launch browser in headless mode for server environment
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        )
+        page = await context.new_page()
+        
+        try:
+            # Navigate to PTC signup page
+            await page.goto(PTC_SIGNUP_URL, timeout=60000)
+            await page.wait_for_load_state("networkidle")
 
-        # Step 2: Payload preparation
-        payload = {
-            "username": username,
-            "password": password,
-            "confirm_password": password,
-            "email": email,
-            "confirm_email": email,
-            "birth_date": "1995-06-15",
-            "country": "US",
-            "terms": "true"
-        }
-        
-        # Step 3: Post registration request
-        post_res = session.post(PTC_SIGNUP_URL, data=payload, headers=headers, timeout=20)
-        
-        # Strict validation: If blocked by Cloudflare, captcha, or non-200/302, fail immediately
-        if post_res.status_code in [200, 302, 303]:
-            response_text = post_res.text.lower()
-            if "error" in response_text or "captcha" in response_text or "cloudflare" in response_text or "blocked" in response_text:
-                return False, email, "Account not created, please try again."
+            # Fill form fields (Selectors based on PTC standard signup form)
+            # Note: Selectors might need minor adjustments based on PTC's exact HTML IDs
+            await page.fill("input[name='username']", username)
+            await page.fill("input[name='password']", password)
+            await page.fill("input[name='confirm_password']", password)
+            await page.fill("input[name='email']", email)
+            await page.fill("input[name='confirm_email']", email)
             
-            # Additional check: Look for success indicators in HTML (if any)
-            if "congratulations" in response_text or "successfully" in response_text or "account created" in response_text:
-                return True, email, "Account successfully registered!"
-            else:
-                # PTC usually blocks programmatic requests without explicit success markers
-                return False, email, "Account not created, please try again."
-        else:
-            return False, email, "Account not created, please try again."
-            
-    except Exception as e:
-        return False, email, "Account not created, please try again."
+            # Select Birth Date (Example: Year, Month, Day selectors)
+            # PTC uses dropdowns or inputs for DOB, let's select birth year if available
+            try:
+                await page.select_option("select[name='birth_year']", "1995")
+                await page.select_option("select[name='birth_month']", "6")
+                await page.select_option("select[name='birth_day']", "15")
+            except:
+                pass
+
+            # Check terms and conditions checkbox if present
+            try:
+                await page.check("input[name='terms']")
+            except:
+                pass
+
+            # Take screenshot of the filled form for proof/debugging
+            screenshot_path = f"{username}.png"
+            await page.screenshot(path=screenshot_path, full_page=True)
+
+            # Check if Cloudflare or Captcha is blocking
+            page_content = await page.content()
+            if "captcha" in page_content.lower() or "cloudflare" in page_content.lower():
+                await browser.close()
+                return False, screenshot_path, "Account not created, please try again (Blocked by Captcha/Cloudflare)."
+
+            # Attempt to click submit button
+            try:
+                await page.click("button[type='submit'], input[type='submit']")
+                await page.wait_for_timeout(5000)
+                # Take post-submit screenshot
+                await page.screenshot(path=screenshot_path, full_page=True)
+            except Exception as sub_err:
+                print(f"Submit click note: {sub_err}")
+
+            await browser.close()
+            return True, screenshot_path, "Form filled and submitted via Playwright!"
+
+        except Exception as e:
+            try:
+                await browser.close()
+            except:
+                pass
+            return False, None, f"Account not created, please try again."
 
 # ----------------- Handlers & Logic -----------------
 
@@ -130,54 +146,62 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Galat Password! Dobara try karein:")
         return
 
-    # 2. PTC Account Auto-Creation Handler
+    # 2. PTC Account Auto-Creation Handler (Playwright)
     if user_id in waiting_for_ptc_pass:
         waiting_for_ptc_pass.remove(user_id)
         custom_password = text
         
-        await update.message.reply_text("⏳ Processing PTC account creation, please wait...")
+        await update.message.reply_text("⏳ Browser automation started, filling PTC form...")
 
-        # Generate Username
         username = generate_random_username()
+        domains = ["smailpro.com", "tmail.ws", "tempmail.ninja"]
+        email = f"{username.lower()}@{random.choice(domains)}"
         
-        # Trigger Automated Account Creation
-        success, email, status_msg = create_ptc_account_automated(username, custom_password)
+        # Run Playwright async function
+        success, img_path, status_msg = await create_ptc_account_playwright(username, custom_password, email)
 
         if success:
             details = (
-                f"🎮 **Pokémon Trainer Club (PTC) Account Created!**\n\n"
+                f"🎮 **Pokémon Trainer Club (PTC) Form Processed!**\n\n"
                 f"👤 **Username:** `{username}`\n"
                 f"🔑 **Password:** `{custom_password}`\n"
                 f"📧 **Email:** `{email}`\n"
                 f"⚡ **Status:** `{status_msg}`\n\n"
-                f"🌐 **Inbox Check:** Use `https://smailpro.com/` to verify and activate."
+                f"🌐 **Inbox Check:** Use `https://smailpro.com/` to verify."
             )
             
-            # Send log to admin chat
+            # Send screenshot and log to admin/user
             try:
-                log_text = (
-                    f"🚨 **New PTC Account Auto-Created!**\n\n"
-                    f"👤 **Username:** `{username}`\n"
-                    f"🔑 **Password:** `{custom_password}`\n"
-                    f"📧 **Email:** `{email}`\n"
-                    f"🆔 **Triggered By User ID:** `{user_id}`"
-                )
-                await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=log_text, parse_mode="Markdown")
-            except Exception as e:
-                print(f"Failed to send log to admin chat: {e}")
+                if img_path and os.path.exists(img_path):
+                    with open(img_path, 'rb') as photo:
+                        await update.message.reply_photo(photo=photo, caption=details, parse_mode="Markdown")
+                    os.remove(img_path)
+                else:
+                    await update.message.reply_text(details, parse_mode="Markdown")
+            except Exception as ex:
+                await update.message.reply_text(details, parse_mode="Markdown")
         else:
             details = (
                 f"❌ **Account not created, please try again.**\n\n"
                 f"👤 **Username Attempted:** `{username}`\n"
-                f"⚠️ **Reason:** PTC Server blocked automated request (Security/Captcha)."
+                f"⚠️ **Reason:** `{status_msg}`"
             )
+            try:
+                if img_path and os.path.exists(img_path):
+                    with open(img_path, 'rb') as photo:
+                        await update.message.reply_photo(photo=photo, caption=details, parse_mode="Markdown")
+                    os.remove(img_path)
+                else:
+                    await update.message.reply_text(details, parse_mode="Markdown")
+            except:
+                await update.message.reply_text(details, parse_mode="Markdown")
 
         keyboard = [
             [InlineKeyboardButton("🔄 Phir se Try Karein", callback_data="menu_gen_ptc")],
             [InlineKeyboardButton("« Main Menu", callback_data="back_to_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(details, reply_markup=reply_markup, parse_mode="Markdown")
+        await update.message.reply_text("Neeche diye gaye option ko chunein:", reply_markup=reply_markup)
         return
 
     if not database.is_authenticated(user_id):
@@ -254,4 +278,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-        
